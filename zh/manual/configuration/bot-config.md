@@ -551,6 +551,8 @@ no_file_record_retention_days = 30  # 文件删掉后描述记录再保留多久
 
 ```toml [bot_config.toml ~vscode-icons:file-type-toml~]
 [voice]
+
+> **ASR 前置**：需在 model_config.toml 的 [model_task_config.voice] 配置转写模型（model_list 非空），Provider 须支持 /v1/audio/transcriptions。仅开 enable_asr 不够。
 enable_asr = false  # 开启后把语音消息识别成文字再处理；需在 model_config 配置 voice 任务模型
 
 > **使用前提**：需在 `model_config.toml` 的 `[model_task_config.voice]` 中配置语音识别模型（`model_list` 非空），且所选 Provider 提供 OpenAI 兼容的 `/v1/audio/transcriptions` 端点。仅开启 `enable_asr` 而不配置 voice 任务模型时，语音消息不会被转写。
