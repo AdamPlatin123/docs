@@ -1,0 +1,121 @@
+<script setup lang="ts">
+import { useData } from 'vitepress'
+import DefaultTheme from 'vitepress/theme'
+import { nextTick, provide } from 'vue'
+import {
+  NolebaseEnhancedReadabilitiesMenu,
+  NolebaseEnhancedReadabilitiesScreenMenu,
+} from '@nolebase/vitepress-plugin-enhanced-readabilities/client'
+import ThemeStyleSwitch from './ThemeStyleSwitch.vue'
+
+const { isDark, lang } = useData()
+const downloadText = () => (lang.value.startsWith('en') ? 'Download One-Click Package' : '下载一键包')
+
+const enableTransitions = () =>
+  'startViewTransition' in document &&
+  window.matchMedia('(prefers-reduced-motion: no-preference)').matches
+
+provide('toggle-appearance', async ({ clientX: x, clientY: y }: MouseEvent) => {
+  if (!enableTransitions()) {
+    isDark.value = !isDark.value
+    return
+  }
+
+  const clipPath = [
+    `circle(0px at ${x}px ${y}px)`,
+    `circle(${Math.hypot(
+      Math.max(x, innerWidth - x),
+      Math.max(y, innerHeight - y)
+    )}px at ${x}px ${y}px)`
+  ]
+
+  await document.startViewTransition(async () => {
+    isDark.value = !isDark.value
+    await nextTick()
+  }).ready
+
+  document.documentElement.animate(
+    { clipPath: isDark.value ? clipPath.reverse() : clipPath },
+    {
+      duration: 300,
+      easing: 'cubic-bezier(0.4, 0, 0.2, 1)',
+      fill: 'forwards',
+      pseudoElement: `::view-transition-${isDark.value ? 'old' : 'new'}(root)`
+    }
+  )
+})
+</script>
+
+<template>
+  <DefaultTheme.Layout>
+    <template #home-hero-actions-after>
+      <div class="hero-download">
+        <a
+          class="VPButton brand hero-download-btn"
+          href="https://cnb.cool/Mai-with-u/MaiBotOneKey/-/releases"
+          target="_blank"
+          rel="noreferrer"
+        >⬇ {{ downloadText() }}</a>
+      </div>
+    </template>
+    <template #nav-bar-content-after>
+      <ThemeStyleSwitch />
+      <NolebaseEnhancedReadabilitiesMenu />
+    </template>
+    <template #nav-screen-content-after>
+      <NolebaseEnhancedReadabilitiesScreenMenu />
+      <ThemeStyleSwitch />
+    </template>
+  </DefaultTheme.Layout>
+</template>
+
+<style>
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+::view-transition-old(root),
+.dark::view-transition-new(root) {
+  z-index: 1;
+}
+
+::view-transition-new(root),
+.dark::view-transition-old(root) {
+  z-index: 9999;
+}
+
+/* 明暗切换收进 ThemeStyleSwitch 的外观菜单，隐藏默认开关
+   （scoped 样式带 [data-v] 属性且在 1280px 断点恢复 display:flex，
+   这里必须 !important 才能压住） */
+.VPNavBarAppearance,
+.VPNavScreenAppearance {
+  display: none !important;
+}
+
+/* 电脑端把功能图标（外观菜单、阅读菜单）排到联系方式（社交链接）
+   之前：功能图标组沿用默认 order:0，社交链接等右端元素 order 提到 1。
+   最终顺序：搜索 → 菜单 → 语言 → 外观 → 阅读 → 联系方式 */
+@media (min-width: 768px) {
+  .VPNavBar .content-body > .VPNavBarSocialLinks,
+  .VPNavBar .content-body > .VPNavBarExtra,
+  .VPNavBar .content-body > .VPNavBarHamburger {
+    order: 1;
+  }
+}
+</style>
+
+<style>
+.hero-download {
+  margin-top: 28px;
+}
+.hero-download-btn {
+  display: inline-block;
+  padding: 0 40px;
+  line-height: 52px;
+  font-size: 17px;
+  border-radius: 24px;
+  text-decoration: none;
+}
+</style>

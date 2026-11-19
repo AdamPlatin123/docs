@@ -1,0 +1,502 @@
+---
+title: Hook Handler
+---
+
+# Hook Handler
+
+`@HookHandler` subscribes a method to a **named Hook point**. The Host fires named Hooks at fixed execution points and schedules every subscribed handler by a fixed order, which is how plugins intercept, rewrite, and observe MaiBot's flow.
+
+`WorkflowStep` is gone — calling it raises `RuntimeError`. Subscribe to the same checkpoint with `@HookHandler`.
+
+## Decorator Signature
+
+::: code-group
+
+```python [Python ~vscode-icons:file-type-python~]
+from maibot_sdk import HookHandler
+from maibot_sdk.types import HookMode, HookOrder, ErrorPolicy
+
+@HookHandler(
+    hook: str,                              # Named Hook name to subscribe to (required)
+    *,
+    name: str = "",                         # Component name, uses method name if empty
+    description: str = "",                  # Component description
+    mode: HookMode = HookMode.BLOCKING,     # Handler mode
+    order: HookOrder = HookOrder.NORMAL,    # Order slot within the same mode
+    timeout_ms: int = 0,                    # Handler timeout (milliseconds), 0 = use Hook default
+    error_policy: ErrorPolicy = ErrorPolicy.SKIP,  # Exception handling policy
+    **metadata,                             # Additional metadata
+)
+```
+
+:::
+
+## Handler Modes
+
+### BLOCKING Mode
+
+- Serial execution, **can modify** incoming `kwargs`
+- Returning `modified_kwargs` can update parameters received by subsequent handlers
+- Returning `action: "abort"` at an abortable Hook cancels its operation and stops subsequent handlers
+- Suitable for scenarios requiring message interception or rewriting
+
+### OBSERVE Mode
+
+- Background concurrent execution, **read-only** bypass observation
+- Does not participate in main flow control — returned `modified_kwargs` and `abort` requests are ignored
+- Suitable for scenarios like logging, data analysis that don't affect the main flow
+
+::: code-group
+
+```python [Python ~vscode-icons:file-type-python~]
+class HookMode(str, Enum):
+    BLOCKING = "blocking"  # Sync wait, can modify data
+    OBSERVE = "observe"    # Async observation, cannot modify
+```
+
+:::
+
+## Order Slots
+
+Handlers within the same mode are sorted and executed by `order`:
+
+- **`HookOrder.EARLY`** — Execute first, suitable for pre-interception
+- **`HookOrder.NORMAL`** — Default order
+- **`HookOrder.LATE`** — Execute later, suitable for supplementary processing
+
+## Error Policy
+
+When a handler raises an exception, subsequent behavior is determined by `error_policy`:
+
+- **`ErrorPolicy.ABORT`** — On exception, abort the current Hook call
+- **`ErrorPolicy.SKIP`** — Log the error, skip this handler and continue (**default**)
+- **`ErrorPolicy.LOG`** — Log the error, and continue executing subsequent hooks
+
+## Scheduling Order
+
+Hook handlers are globally sorted according to the following rules:
+
+1. **Mode priority**: `blocking` before `observe`
+2. **Order slot**: `early` → `normal` → `late`
+3. **Source priority**: Built-in plugins before third-party plugins
+4. **Plugin ID**: Sorted alphabetically
+5. **Handler name**: Sorted alphabetically
+
+## Basic Usage
+
+### Blocking Mode Example: Intercept and Modify Messages
+
+::: code-group
+
+```python [Python ~vscode-icons:file-type-python~]
+from maibot_sdk import MaiBotPlugin, HookHandler
+from maibot_sdk.types import HookMode, HookOrder, ErrorPolicy
+
+
+class MyPlugin(MaiBotPlugin):
+    async def on_load(self) -> None:
+        self.ctx.logger.info("Plugin loaded")
+
+    async def on_unload(self) -> None:
+        self.ctx.logger.info("Plugin unloaded")
+
+    async def on_config_update(self, scope: str, config_data: dict, version: str) -> None:
+        pass
+
+    @HookHandler(
+        "chat.receive.before_process",
+        name="message_filter",
+        description="Filter inbound messages",
+        mode=HookMode.BLOCKING,
+        order=HookOrder.EARLY,
+        error_policy=ErrorPolicy.ABORT,
+    )
+    async def handle_message_filter(self, **kwargs):
+        message = kwargs.get("message", {})
+        # Filter logic: if message contains banned words, terminate processing chain
+        raw_message = message.get("raw_message", "")
+        if "banned_word" in raw_message:
+            self.ctx.logger.info("Message filtered: %s", raw_message)
+            return {"action": "abort", "custom_result": {"reason": "入站消息结构不合法。"}}
+
+        # Modify message content and continue
+        kwargs["message"]["filtered"] = True
+        return {"action": "continue", "modified_kwargs": kwargs}
+```
+
+:::
+
+### Observe Mode Example: Log Recording
+
+::: code-group
+
+```python [Python ~vscode-icons:file-type-python~]
+from maibot_sdk import MaiBotPlugin, HookHandler
+from maibot_sdk.types import HookMode, HookOrder
+
+
+class LogPlugin(MaiBotPlugin):
+    async def on_load(self) -> None:
+        self.ctx.logger.info("Log plugin loaded")
+
+    async def on_unload(self) -> None:
+        self.ctx.logger.info("Log plugin unloaded")
+
+    async def on_config_update(self, scope: str, config_data: dict, version: str) -> None:
+        pass
+
+    @HookHandler(
+        "chat.receive.after_process",
+        name="message_logger",
+        description="Record all inbound messages",
+        mode=HookMode.OBSERVE,
+        order=HookOrder.LATE,
+    )
+    async def observe_message(self, **kwargs):
+        message = kwargs.get("message", {})
+        self.ctx.logger.info(
+            "Observed message: user=%s, text=%s",
+            message.get("user_id", "unknown"),
+            message.get("raw_message", ""),
+        )
+        # Observe mode return values are ignored
+```
+
+:::
+
+### Blocking Mode Example: Modify Send Parameters
+
+::: code-group
+
+```python [Python ~vscode-icons:file-type-python~]
+from maibot_sdk import MaiBotPlugin, HookHandler
+from maibot_sdk.types import HookMode, HookOrder
+
+
+class SendInterceptorPlugin(MaiBotPlugin):
+    async def on_load(self) -> None:
+        self.ctx.logger.info("Send interceptor plugin loaded")
+
+    async def on_unload(self) -> None:
+        self.ctx.logger.info("Send interceptor plugin unloaded")
+
+    async def on_config_update(self, scope: str, config_data: dict, version: str) -> None:
+        pass
+
+    @HookHandler(
+        "send_service.before_send",
+        name="send_modifier",
+        description="Modify send parameters",
+        mode=HookMode.BLOCKING,
+        order=HookOrder.NORMAL,
+        timeout_ms=5000,
+    )
+    async def modify_send_params(self, **kwargs):
+        # Disable typing effect, force enable send log
+        kwargs["typing"] = False
+        kwargs["show_log"] = True
+        return {"action": "continue", "modified_kwargs": kwargs}
+```
+
+:::
+
+## Built-in Hook List
+
+The Host registers 30 Hook points at startup; each one notes whether abort (terminating the call chain) and parameter modification (changing the kwargs received by subsequent handlers) are allowed. Subscribing to a name that is not registered fails plugin registration outright.
+
+### Chat Message Chain
+
+- **`chat.receive.before_process`** — Before the inbound message runs `SessionMessage.process()` — abort allowed · param changes allowed
+
+  Use this hook to annotate image context: image/emoji entries in the message dictionary's `raw_message` carry `binary_data_base64` when media is available; forwarded content is nested under `data[].content`. A blocking handler can return `modified_kwargs={"message": updated_message}` and add `{"type":"text","data":"Recognition hint"}` after the corresponding image. Move synchronous inference to a thread or separate process and bound the total duration; continue the original message on timeout or failure. Model scores are not calibrated correctness probabilities. This hook does not require collecting chat images into a training dataset.
+- **`chat.receive.after_process`** — After the inbound message completes lightweight preprocessing — abort allowed · param changes allowed
+
+### Command Execution Chain
+
+- **`chat.command.before_execute`** — After the command matches successfully and before actual execution — abort allowed · param changes allowed
+- **`chat.command.after_execute`** — After command execution ends — abort not allowed · param changes allowed
+
+### Emoji Chain
+
+- **`emoji.receive.before_cache`** — A chat emoji missed the cache and is about to be written — abort allowed · param changes not supported
+
+  Receives `emoji_hash`, `binary_data_base64`, `session_id`. Aborting skips caching and built-in recognition for that emoji.
+- **`emoji.maintenance.before_register`** — Before a scheduled maintenance pass registers a candidate emoji — abort allowed · param changes not supported
+
+  Receives `file_name`, `file_size`. Aborting skips only the current candidate; the scan continues.
+- **`emoji.register.after_build_description`** — After the vision model generates the emoji description — abort allowed · param changes allowed
+
+  Receives `emoji`, `description`, `image_format`. Mutating the kwargs rewrites the description; aborting discards this description run.
+
+### Jargon Chain
+
+- **`jargon.extract.before_persist`** — Before a jargon entry is written to the database — abort allowed · param changes allowed
+- **`jargon.inference.before_finalize`** — Before a jargon inference result is written back — abort allowed · param changes allowed
+
+### Expression Chain
+
+- **`expression.select.before_select`** — Before an expression is selected — abort allowed · param changes allowed
+- **`expression.select.after_selection`** — After expression selection completes — abort allowed · param changes allowed
+- **`expression.learn.after_extract`** — After expression learning parses the candidates — abort allowed · param changes allowed
+- **`expression.learn.before_upsert`** — Before an expression is written to the database — abort allowed · param changes allowed
+
+### Send Service Chain
+
+- **`send_service.after_build_message`** — After the outbound `SessionMessage` is built — abort allowed · param changes allowed
+- **`send_service.before_send`** — Before calling Platform IO to send — abort allowed · param changes allowed
+- **`send_service.after_send`** — After the send process completes — abort not allowed · param changes not supported
+
+### Maisaka Planner Chain
+
+- **`maisaka.planner.before_request`** — Before the Maisaka planner requests the model — abort not allowed · param changes allowed
+- **`maisaka.planner.after_response`** — After Maisaka receives the model response — abort not allowed · param changes allowed
+
+### Maisaka Replyer Chain
+
+- **`maisaka.replyer.before_request`** — Before the Maisaka replyer sends the model request; can read or rewrite this call's `reply_tool_args` — abort allowed · param changes allowed
+- **`maisaka.replyer.before_model_request`** — After the Maisaka replyer builds the final `items` and before the model request; can rewrite the actual message list sent to the model — abort allowed · param changes allowed
+- **`maisaka.replyer.after_response`** — After the Maisaka replyer receives the model response; can rewrite the reply or request regeneration — abort allowed · param changes allowed
+- **`maisaka.reply.before_post_process`** — Before text post-processing of the final visible reply; can rewrite the body or adjust post-processing for this reply only — abort allowed · param changes allowed
+- **`maisaka.reply.after_split`** — After the final reply has been split and before segment limits and merging apply; can edit the ordered text segments — abort not allowed · param changes allowed
+
+`reply_tool_args` remains visible in the expression selection chain, `maisaka.replyer.before_request`, and `maisaka.replyer.after_response`. It contains extra reply tool arguments other than the internal `msg_id`, `_reply_id`, and `_plugin_reply_prompt` parameters; modifications returned from `before_request` continue to later replyer hooks.
+
+#### Reading the reply template profile
+
+`reply_tool_args["_replyer_prompt_profile"]` on `maisaka.replyer.before_model_request` names the template used for this reply:
+
+::: fields
+- **`reply`** — The regular group and private reply template.
+- **`mai_replier`** — The Mai Replier adapter, with separate System / User templates for group and private chats.
+- **`document`** — The standalone writing template of the `maisaka.reply.generate` long-form capability.
+:::
+
+The host overwrites this field from the model actually selected for this attempt. Read it only — it cannot force a different template. Choosing a model from a plugin, switching candidates, and regenerating all produce the identifier again from the actual model. It lives inside `reply_tool_args` only and is never passed to handlers as a separate top-level argument. At `before_request` the actual model is not chosen yet, so the identifier is not available there.
+
+The pre-request hook sees an already built template but can still rewrite it through `modified_kwargs["items"]`. Prefer `extra_prompt` to append reply requirements. Plugins that handle Context Items directly must check the profile first: the reply template merges chat history into a user message, so do not assume each past message is its own Item, and do not rely on the position of any fixed prompt paragraph. When a plugin rewrites the final Items, the host does not trim plugin content after the hook.
+
+`maisaka.replyer.after_response` keeps its existing protocol for body rewrite, output Item rewrite, retry, and retry reason; plugin requirements and regeneration constraints survive in both the regular reply template and the Mai Replier template.
+
+#### Controlling Text Post-Processing Per Reply
+
+`maisaka.reply.before_post_process` runs after the final reply has been selected but before text splitting and Chinese typo injection. A blocking handler can read `response`, `session_id`, `reply_message_id`, and `reply_tool_args`, and can modify these fields:
+
+- **`response`** `str` — The final visible body for this reply.
+- **`skip_post_process`** `bool` — When `true`, this reply completely bypasses `process_llm_response`, including text splitting, Chinese typo injection, parenthesized-content cleanup, and length limiting.
+- **`enable_splitter`** `bool` — Whether this reply may be split according to the global configuration.
+- **`enable_chinese_typo`** `bool` — Whether Chinese typo injection may run for this reply according to the global configuration.
+
+`skip_post_process` only bypasses body text processing. Rich-reply attachments such as images, mentions, and emoji are still assembled. The handler must preserve the remaining `kwargs`, and all three policy fields must remain booleans.
+
+::: code-group
+
+```python [Python ~vscode-icons:file-type-python~]
+from maibot_sdk import HookHandler
+from maibot_sdk.types import HookMode
+
+
+@HookHandler("maisaka.reply.before_post_process", mode=HookMode.BLOCKING)
+async def preserve_selected_reply(self, **kwargs):
+    response = kwargs.get("response", "")
+    if response.startswith("[keep-raw]"):
+        kwargs["response"] = response.removeprefix("[keep-raw]").lstrip()
+        kwargs["skip_post_process"] = True
+
+    return {"action": "continue", "modified_kwargs": kwargs}
+```
+
+:::
+
+#### Switching Models or Appending Prompts Before Replyer Requests
+
+`maisaka.replyer.before_request` lets you adjust parameters before reply generation. A blocking handler can rewrite these fields:
+
+- **`task_name`** `str` — Task name used by this replyer request. Changing it uses that task's default model pool and generation options.
+- **`model_name`** `str` — Concrete model name for this replyer request. It must exist in `[[models]]` in `model_config.toml`. When set, only this model is attempted once instead of rotating through the task model pool.
+- **`extra_prompt`** `str` — Extra reply requirements appended to this replyer prompt.
+- **`reply_reason`** `str` — Reference information passed by the reply tool. It can be rewritten.
+- **`reply_tool_args`** `dict` — Extra reply tool arguments. Changes continue to later replyer hooks.
+
+`model_name` is a concrete model name. To route through another task's model pool, change `task_name`. If both `task_name` and `model_name` are set, the task supplies generation options such as temperature, token limit, and timeout, while `model_name` selects the actual model.
+
+If you need to rewrite the exact message list sent by the replyer, use `maisaka.replyer.before_model_request`. This Hook fires after the replyer has built Context Items for the selected model. Blocking handlers can return new Items through `modified_kwargs["items"]`; this is useful for inserting a synthetic first `user` message after `system`, experimenting with temporary prompts, or logging the final request body. The Hook only changes this temporary LLM request and does not write back to chat history or affect mid-term memory insertion.
+
+::: tip An easier alternative
+If you only want to inject parameters into a reply or rewrite reply content before sending (for example, turning text into voice), prefer the [Reply Extension](./reply-extensions.md): no Planner Hook changes, and sending, history, and failure handling are managed by the main program.
+:::
+
+A common pattern is to first use `maisaka.planner.before_request` to add a parameter schema to the built-in `reply` tool so the planner can fill that parameter, then read `reply_tool_args` in `maisaka.replyer.before_request` to route the model:
+
+::: code-group
+
+```python [Python ~vscode-icons:file-type-python~]
+from maibot_sdk import MaiBotPlugin, HookHandler
+from maibot_sdk.types import HookMode
+
+
+class ThinkingLevelPlugin(MaiBotPlugin):
+    @HookHandler("maisaka.planner.before_request", mode=HookMode.BLOCKING)
+    async def add_reply_tool_param(self, **kwargs):
+        for tool in kwargs.get("tool_definitions", []):
+            function = tool.get("function", {})
+            if function.get("name") != "reply":
+                continue
+
+            parameters = function.setdefault("parameters", {})
+            properties = parameters.setdefault("properties", {})
+            properties["thinking_level"] = {
+                "type": "string",
+                "enum": ["normal", "deep"],
+                "description": "Reply thinking intensity. normal means a regular reply; deep uses a stronger model and analyzes context more carefully.",
+            }
+        return {"action": "continue", "modified_kwargs": kwargs}
+
+    @HookHandler("maisaka.replyer.before_request", mode=HookMode.BLOCKING)
+    async def route_replyer_model(self, **kwargs):
+        reply_tool_args = kwargs.get("reply_tool_args", {})
+        if reply_tool_args.get("thinking_level") == "deep":
+            kwargs["model_name"] = "your-deep-model-name"
+            kwargs["extra_prompt"] = "Please understand the context more carefully before replying."
+
+        return {"action": "continue", "modified_kwargs": kwargs}
+```
+
+:::
+
+Adding or changing a hook name usually does not require plugin SDK runtime changes: `@HookHandler` accepts a string hook name, and availability is validated by the Host-registered HookSpec. SDK-side updates are only needed for constants, type hints, docs, or examples.
+
+### Example: Replacing the Expression Selection
+
+
+`before_select` receives `chat_id`, `session_id`, `chat_info`, `chat_history`, `reply_message`, `reply_tool_args`, `target_message`, `reply_reason`, `max_num`, `think_level`, and `candidates`. `reply_tool_args` contains extra reply tool arguments other than `msg_id`, `set_quote`, and `reference_info`. `after_selection` also receives `selected_expression_ids` and `selected_expressions`.
+
+::: code-group
+
+```python [Python ~vscode-icons:file-type-python~]
+@HookHandler("expression.select.after_selection", mode=HookMode.BLOCKING)
+async def replace_expression_selection(self, **kwargs):
+    strategy = kwargs.get("reply_tool_args", {}).get("expression_strategy")
+    candidates = kwargs.get("candidates", [])
+    selected_ids = [item["id"] for item in candidates[:1]]
+    kwargs["selected_expression_ids"] = selected_ids
+    return {"action": "continue", "modified_kwargs": kwargs}
+```
+
+:::
+
+### Desktop Pet Chain
+
+Desktop pet hooks are all observation-only: no abort, no parameter changes; handlers run concurrently with a default 5-second timeout.
+
+- **`desktop_pet.ready`** — the pet window is ready
+- **`desktop_pet.closed`** — a ready window exits; `reason` is `stopped` or `unexpected`
+- **`desktop_pet.clicked`** — the user single-clicks the pet body
+- **`desktop_pet.drag_started`** — first actual movement past the drag threshold; `gesture_id`, `offset_x`, `offset_y`, `scale`
+- **`desktop_pet.drag_ended`** — the drag ends or is cancelled; `gesture_id` matches the start event for pairing
+- **`desktop_pet.visibility_changed`** — visibility changed; `visible` (boolean)
+- **`desktop_pet.skin_changed`** — a skin switch succeeded; `skin_id`
+
+`closed` does not fire when a window exits before ever becoming ready; a single click never triggers the drag hooks. Plugins may call the pet's bubble and animation capabilities inside these hooks — a busy animation returns an error.
+
+## Host Validation Rules
+
+During plugin registration, the Host validates `@HookHandler` declarations. An invalid declaration fails plugin registration outright. The rules are:
+
+1. **The Hook name must be registered**: the `hook` argument must be a name that already exists in the built-in Hook list above. Passing an unregistered Hook name fails registration.
+2. **mode must satisfy the Hook's capability constraints**: the Host checks whether `mode` is compatible with that Hook point's capabilities (for example, a Hook that only allows parameter modification cannot run in a mode that forbids it).
+3. **error_policy=ABORT requires a Hook that allows abort**: `error_policy=ErrorPolicy.ABORT` can only be declared when that Hook's "abort allowed" column is "yes". Declaring the `ABORT` policy for a Hook that does not allow abort fails registration.
+
+At runtime the Host exposes this Hook list to the WebUI backend route `/plugins/runtime/hooks`, so panels or debugging tools can read the dynamic center table directly.
+
+## Handler Return Values
+
+Blocking mode handlers can return a dictionary to control the subsequent flow:
+
+- **`action`** `str` — `"continue"` proceeds; `"abort"` cancels the operation at an abortable checkpoint.
+- **`modified_kwargs`** `dict` — Replaces the complete parameter dictionary for subsequent handlers; preserve existing fields when editing.
+- **`custom_result`** `Any` — Additional data; use `{"reason": "reason"}` to provide the shared cancellation reason.
+
+Observe mode handler return values are ignored — no need to return a control dictionary.
+
+### Cancel an Operation with a Reason
+
+To prevent a reply or send, return `action="abort"` with a specific reason in `custom_result.reason`. The return value is a plain dictionary.
+
+::: code-group
+
+```python [Python ~vscode-icons:file-type-python~]
+from maibot_sdk import HookHandler
+from maibot_sdk.types import HookMode
+
+
+@HookHandler("maisaka.replyer.before_request", mode=HookMode.BLOCKING)
+async def guard_reply(self, request_type="", reply_message_id="", **kwargs) -> dict:
+    if request_type == "maisaka.replyer" and not reply_message_id:
+        return {
+            "action": "abort",
+            "custom_result": {"reason": "没有明确的回复目标，请选择具体消息后再回复。"},
+        }
+    return {"action": "continue"}
+```
+
+:::
+
+`reason` is an optional string. Explain the condition and suggest an adjustment when useful.
+Return the dictionary for normal cancellation; `error_policy` governs exceptions raised by the handler.
+Only `BLOCKING` handlers at abortable Hooks can cancel an operation. Cancellation takes priority over body
+rewrites and `retry` in the same return value; dispatch ends after the first effective abort.
+
+### Cancellation Scope
+
+- **Before generation** — `maisaka.replyer.before_request` / `before_model_request` cancel this generation before the model request, without model retries, switching, or failure penalties.
+- **After generation** — `maisaka.replyer.after_response` / `maisaka.reply.before_post_process` cancel this reply, stopping further regeneration, post-processing, and sending.
+- **Before sending** — `send_service.after_build_message` / `before_send` cancel the current message; receipts for already delivered segments are retained and later segments stop.
+- **Emoji cache and registration** — `emoji.receive.before_cache` skips caching and recognition for that emoji; `emoji.maintenance.before_register` skips the current candidate; `emoji.register.after_build_description` cancels this description run.
+- **Expression selection** — `expression.select.before_select` / `after_selection` skip only expression selection. Reply generation may continue; the reason is retained in selection results and generation metrics.
+- **Receiving, commands, and learning** — Stop the corresponding message processing, command, jargon write, or emoji registration. Logs retain the handler and reason; expression learning also records the reason in its status.
+
+Planner Hooks, send-completion notifications, and pet state observations remain non-abortable.
+Check `allow_abort` in the running Host's `/plugins/runtime/hooks`; upgrading the SDK alone does not change Host capabilities.
+
+### What the Planner Receives
+
+reply and send_emoji share cancellation feedback: `error_code="plugin_aborted"`, with `reason` and
+`hook_abort: {hook_name, handler_name, reason}`. reply also distinguishes `model_empty_response`
+(the model produced no body) from `plugin_empty_response` (a Hook cleared a body produced by the model).
+
+Return `abort` to cancel a reply. Use `retry=True` and `retry_reason` to request a rewrite;
+`retry_reason` constrains the next generation. Plugins that cleared `response` to block replies should move
+their private suppression reasons to `custom_result.reason`. The Host dispatcher converts the legacy emoji
+`abort_message` once; a nonempty new reason takes precedence.
+
+Cancellation prompts the Planner to adjust the call or stop. It does not create a message ban across future calls.
+
+## Hook Dispatch Flow
+
+```mermaid
+sequenceDiagram
+    participant Host as Main Program
+    participant HD as HookDispatcher
+    participant B1 as Blocking Handler 1
+    participant B2 as Blocking Handler 2
+    participant O1 as Observe Handler
+
+    Host->>HD: Trigger Hook(hook_name, kwargs)
+    HD->>HD: Collect and sort all handlers
+    HD->>B1: Serial execute(kwargs)
+    B1-->>HD: {action: "continue", modified_kwargs: ...}
+    HD->>B2: Serial execute(modified_kwargs)
+    B2-->>HD: {action: "continue", ...}
+    HD--)O1: Background concurrent execute(kwargs)
+    HD-->>Host: Return final result
+```
+
+## Verify and Troubleshoot
+
+**Verification** — reload the plugin, then trigger the chain once (for example, have the bot receive a message so `chat.receive.before_process` fires): the Runner log shows your handler's output and the message is modified or aborted as expected, which means the hook name, mode, and return value are all correct.
+
+- **Plugin registration fails** — the Host validates declarations at registration time: `hook` must be a name from the built-in list, and one wrong word (such as `chat.receive.before_processing`) fails registration, with the offending component named in the log.
+- **You declared `ErrorPolicy.ABORT` for a Hook that does not allow abort** — `send_service.after_send`, `chat.command.after_execute`, and `maisaka.planner.*` do not allow abort, so that declaration fails registration; drop the policy or subscribe to a Hook that allows abort.
+- **Your `modified_kwargs` changes are ignored** — return values are honored only in `mode=HookMode.BLOCKING`; `OBSERVE` handlers run concurrently in the background and their `modified_kwargs` and `abort` requests are discarded.
+- **The plugin raises `RuntimeError` while loading** — it still contains `@WorkflowStep`, which was removed with no compatibility mapping. Switch to `@HookHandler` on the same checkpoint and rename the parameters to `mode` / `order`.
+- **Handlers run in an order you did not expect** — sorting is mode → order → origin → plugin ID → handler name: built-in plugins always precede third-party ones, and `HookOrder.EARLY` only moves you ahead within the same mode.

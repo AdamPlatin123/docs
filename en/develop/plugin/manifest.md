@@ -1,0 +1,393 @@
+---
+title: Manifest
+---
+# Manifest System
+
+Every plugin needs a `_manifest.json` in its root declaring metadata, version compatibility, dependencies, and capability requirements. The Host-side `ManifestValidator` validates it strictly before loading.
+
+::: tip Plugin metadata and runtime configuration
+- `_manifest.json`: Declares the plugin ID, version, dependencies, and capabilities and is validated and managed by the Host
+- `config_model` in `plugin.py`: Declares the configuration structure, defaults, and WebUI metadata
+- `config.toml`: Stores the current installation's runtime configuration and is generated and maintained by the Runner from `config_model`
+:::
+
+## _manifest.json Structure
+
+Below is a complete Manifest example:
+
+::: code-group
+
+```json [JSON ~vscode-icons:file-type-json~]
+{
+  "manifest_version": 2,
+  "id": "com.example.my-plugin",
+  "version": "1.0.0",
+  "name": "My Plugin",
+  "description": "An example plugin",
+  "author": {
+    "name": "Developer",
+    "url": "https://github.com/developer"
+  },
+  "license": "MIT",
+  "urls": {
+    "repository": "https://github.com/developer/my-plugin",
+    "homepage": "https://example.com",
+    "documentation": "https://docs.example.com",
+    "issues": "https://github.com/developer/my-plugin/issues"
+  },
+  "host_application": {
+    "min_version": "1.4.0",
+    "max_version": "1.4.99"
+  },
+  "sdk": {
+    "min_version": "2.22.0",
+    "max_version": "2.22.99"
+  },
+  "dependencies": [],
+  "changelog": "CHANGELOG.md",
+  "plugin_type": "tool",
+  "display": {
+    "icon": {
+      "type": "lucide",
+      "value": "wrench"
+    }
+  },
+  "capabilities": ["send.text", "send.emoji", "config.get"],
+  "i18n": {
+    "default_locale": "zh-CN",
+    "locales_path": "i18n",
+    "supported_locales": ["zh-CN", "en-US"]
+  }
+}
+```
+
+:::
+
+## Required Fields
+
+- **`manifest_version`** `2` — Manifest protocol version, currently fixed at `2`
+- **`id`** `string` — Unique plugin identifier built from letters, digits, and underscores, split by dots or hyphens (e.g., `com.author.plugin`). The validator does not require lowercase — the official plugin `Mai-with-u.qq-adapter` is mixed case; the plugin market and official plugins just use lowercase by convention.
+- **`version`** `string` — Plugin version number, must be a strict three-part semantic version (e.g., `1.0.0`)
+- **`name`** `string` — Plugin display name
+- **`description`** `string` — Plugin description
+- **`author`** `object` — Plugin author information, containing `name` (author name) and `url` (author homepage, must be an HTTP/HTTPS URL)
+- **`license`** `string` — Plugin license
+- **`urls`** `object` — Collection of plugin-related links (see below)
+- **`host_application`** `object` — Host compatibility range (see below)
+- **`sdk`** `object` — SDK compatibility range (see below)
+- **`capabilities`** `string[]` — List of capability requests declared by the plugin; empty values are not allowed. **Capability names are per item** (such as `send.text`, `emoji.get_random`, `config.get`) and the Host matches them exactly: you may only call what you declared, and an undeclared call is rejected with "capability not granted". See the capability groups in the [API Reference](./api-reference).
+- **`i18n`** `object` — Internationalization configuration (see below)
+
+## Optional Fields
+
+### plugin_type Plugin Type
+
+`plugin_type` declares the plugin's primary category for WebUI display and filtering. It is optional; an omitted value or `extension` displays as “Uncategorized” and is excluded from category filters. Choose the category that best describes the main function.
+
+- `adapter` — Adapters for chat platforms and protocols
+- `tool` — Commands, queries, and model-callable tools
+- `provider` — LLM, TTS, API, and other service providers
+- `management` — Group, permission, and administration management
+- `data` — Data and knowledge, including statistics, memory, and knowledge bases
+- `media` — Image, audio, video, and emoji processing
+- `game` — Games, entertainment, and interaction
+- `integration` — External platforms, search services, and webhooks
+- `other` — Plugins that do not fit another category
+- `chat` — Conversation and reply behavior
+- `creative` — Drawing, writing, and content generation
+- `automation` — Scheduled tasks and automated workflows
+- `deskpet` — Desktop pets and related interaction
+
+For legacy values, `knowledge` maps to data, `entertainment` to game, and `search` to integration; other unknown values display as other. The Host currently accepts strings without enforcing this list. `adapter` also controls adapter Runner grouping.
+
+### display Display Metadata
+
+`display.icon` is used to declare the plugin icon. This field only affects WebUI display and does not participate in plugin runtime behavior.
+
+::: code-group
+
+```json [JSON ~vscode-icons:file-type-json~]
+{
+  "display": {
+    "icon": {
+      "type": "local",
+      "value": "assets/icon.png",
+      "fallback": "package",
+      "background": "#1f2937"
+    }
+  }
+}
+```
+
+:::
+
+- `type`: `lucide`, `emoji`, or `local`
+- `value`: Icon value. `lucide` uses the icon name, `emoji` uses a single emoji or short text, `local` uses a relative path within the plugin directory
+- `fallback`: Optional, the lucide icon name to use if the icon fails to load
+- `background`: Optional, the icon background color in `#RRGGBB` format
+
+Online URLs are not allowed as plugin icons. Local icons only support `.png`, `.jpg`, `.jpeg`, `.webp`, and `.svg`. Paths must be within the plugin directory; absolute paths, `..`, or symbolic links are not permitted.
+
+### urls Link Collection
+
+- **`repository`** · Required — Plugin repository URL, must be an HTTP/HTTPS URL
+- **`homepage`** · Optional — Plugin homepage URL
+- **`documentation`** · Optional — Plugin documentation URL
+- **`issues`** · Optional — Plugin issue reporting URL
+
+### changelog Update Log
+
+- **`changelog`** · Optional — Location of the update log, in one of two forms: a URL starting with `http://` / `https://`, or a relative path to a `.md` file inside the plugin directory (e.g., `CHANGELOG.md`)
+
+Absolute paths, paths containing `..`, and files without the `.md` suffix are rejected by the validator. When the field is omitted, a locally installed plugin falls back to a file named `changelog.md` at the plugin root (case-insensitive, so `CHANGELOG.md` counts); the plugin market detail page only reads the path declared here.
+
+### host_application / sdk Version Range
+
+Both share the same structure, declaring a closed interval:
+
+::: code-group
+
+```json [JSON ~vscode-icons:file-type-json~]
+{
+  "min_version": "1.4.0",
+  "max_version": "1.4.99"
+}
+```
+
+:::
+
+- `min_version`: Minimum allowed version (inclusive)
+- `max_version`: Maximum allowed version (inclusive)
+- Both must be strict three-part semantic version numbers (`X.Y.Z`) and cannot be empty
+- `min_version` cannot be greater than `max_version`
+
+**When and how it is checked**: both ranges are validated by the Runner through `ManifestValidator` when the plugin loads. The Host passes its own version via `MAIBOT_HOST_VERSION`; the SDK version is whatever `maibot-plugin-sdk` is actually imported in the Runner's environment. During the handshake (`runner.hello`) the Host only checks that the Runner's own SDK version falls inside the fixed range `[1.0.0, 2.99.99]` — that is a separate check from the `sdk` range declared in the manifest.
+
+The two failure modes are not symmetric:
+
+- **Host out of range** — if the current Host is above `max_version` while the major version matches and the minor version is at most 1 higher, the plugin **still loads** with a warning only. Anything higher is an error and the plugin is blocked; below `min_version` is always an error
+- **SDK out of range** — recorded as a warning regardless of direction, and the plugin **still loads**. Installation, updates, and Runner connections are not blocked by the SDK range; actual compatibility is decided by runtime behavior
+
+::: danger max_version must be an explicit upper bound
+Set `max_version` to the highest major.minor version you have actually tested, followed by `.99` — for example `1.4.99` if you verified on 1.4, or `1.5.99` for 1.5. Patch releases within that minor version (`1.4.10`, `1.4.37`) fall inside the range and raise nothing; a bound of `1.4.0` would warn on every patch release. Advancing one minor version (`1.5.x`) is let through by the compatibility window with a warning, which gives you time to re-test.
+
+Do not write `1.99.99`, `999.999.999`, or any other bound that does not correspond to a real version: it amounts to declaring no upper bound, and the plugin gets loaded on versions it was never verified against.
+:::
+
+::: code-group
+
+```json [JSON ~vscode-icons:file-type-json~]
+{
+  "host_application": {
+    "min_version": "1.4.0",
+    "max_version": "1.4.99"
+  },
+  "sdk": {
+    "min_version": "2.22.0",
+    "max_version": "2.22.99"
+  }
+}
+```
+
+:::
+
+### i18n Internationalization Configuration
+
+- **`default_locale`** · Required — Default language code (e.g., `zh-CN`)
+- **`locales_path`** · Optional — Path to the language resource files directory
+- **`supported_locales`** · Optional — List of supported languages; must not contain empty values or duplicates. If non-empty, `default_locale` must exist in this list
+
+### llm_providers LLM Provider Declaration
+
+Declares the LLM Provider capabilities provided by the plugin, for proxy invocation by other plugins via `ctx.llm`.
+
+- **`client_type`** · Required — Unique identifier for the Provider, must exactly match the value declared in the `@LLMProvider` decorator
+- **`name`** · Optional · Defaults to an empty string — Display name for the Provider
+- **`description`** · Optional · Defaults to an empty string — Functional description of the Provider
+- **`version`** · Optional · Default `"1.0.0"` — Version number of the Provider
+
+::: warning Dual Declaration Requirement
+The `llm_providers` field and the `@LLMProvider` decorator must both be declared, and `client_type` must match exactly. If declared in only one place, or if one is missing or inconsistent, the plugin will be prevented from loading.
+:::
+
+::: danger Conflict Loading Policy
+If two plugins declare the same `client_type`, **both plugins will be prevented from loading**. Please use a unique prefix (e.g., `com.example.my-provider`) when designing Providers to avoid conflicts.
+:::
+
+::: code-group
+
+```json [JSON ~vscode-icons:file-type-json~]
+{
+  "llm_providers": [
+    {
+      "client_type": "my_custom_llm",
+      "name": "My Custom LLM",
+      "description": "A custom LLM provider",
+      "version": "1.0.0"
+    }
+  ]
+}
+```
+
+:::
+
+## Dependency Declaration
+
+The `dependencies` array supports two types of dependencies, distinguished by the `type` field:
+
+### Plugin-Level Dependencies
+
+::: code-group
+
+```json [JSON ~vscode-icons:file-type-json~]
+{
+  "type": "plugin",
+  "id": "com.example.other-plugin",
+  "version_spec": ">=1.0.0,<2.0.0"
+}
+```
+
+:::
+
+- `id`: The ID of the dependent plugin, following the same formatting rules as plugin IDs
+- `version_spec`: Version constraint expression, using PEP 440 style (e.g., `>=1.0.0`, `~=1.0`)
+- Circular dependencies or dependencies on oneself are not allowed
+- Declaring the same plugin dependency multiple times is not allowed
+
+### Python Package Dependencies
+
+::: code-group
+
+```json [JSON ~vscode-icons:file-type-json~]
+{
+  "type": "python_package",
+  "name": "httpx",
+  "version_spec": ">=0.24.0"
+}
+```
+
+:::
+
+- `name`: Python package name; only letters, numbers, dots, underscores, and hyphens are allowed
+- `version_spec`: Version constraint expression
+
+### System Tool Dependencies
+
+`dependencies` only covers Python packages; there is no type for system packages or executables. Commands such as `ffmpeg`, `imagemagick`, and `7z` must ship with the plugin: the official Docker image does not preinstall media tools, native installs depend on the user's system, and the same plugin behaves differently on Windows or macOS.
+
+For ffmpeg, use a Python package that bundles a static binary (such as `imageio-ffmpeg` or `static-ffmpeg`) and declare it as `python_package`:
+
+::: code-group
+
+```json [JSON ~vscode-icons:file-type-json~]
+{
+  "type": "python_package",
+  "name": "imageio-ffmpeg",
+  "version_spec": ">=0.6.0"
+}
+```
+
+:::
+
+Resolve the absolute path of the bundled binary when calling it:
+
+::: code-group
+
+```python [Python ~vscode-icons:file-type-python~]
+import asyncio
+
+import imageio_ffmpeg
+
+# Static binary from the installed package dependency, independent of the host PATH
+FFMPEG = imageio_ffmpeg.get_ffmpeg_exe()
+
+
+async def merge_av(v_path: str, a_path: str, output_path: str) -> None:
+    process = await asyncio.create_subprocess_exec(
+        FFMPEG,
+        "-y",
+        "-i",
+        v_path,
+        "-i",
+        a_path,
+        "-c",
+        "copy",
+        "-map",
+        "0:v:0",
+        "-map",
+        "1:a:0",
+        output_path,
+    )
+    exit_code = await process.wait()
+    if exit_code != 0:
+        raise RuntimeError(f"ffmpeg exited with code {exit_code}")
+```
+
+:::
+
+- **Preflight at load** — Resolve the executable path once in `on_load()` and confirm it runs. Failing at the merge step after downloading tens of MB of media leaves users without an actionable message.
+- **Allow a config override** — Add an optional ffmpeg path field to the config model so users can switch to their own build or troubleshoot without editing code.
+- **Document requirements in README** — When users truly must provide a system tool (for example, GPU encoding), list the install command for each platform under dependencies. A Docker-only workaround misses native and Windows users.
+
+### Dependency Resolution Process
+
+`PluginDependencyPipeline` performs dependency analysis uniformly on the Host side:
+
+1. **Scanning**: Collect `_manifest.json` from all plugins
+2. **Host Conflict Detection**: If a plugin's Python package dependency has no intersection with the main program's dependency constraints, loading is blocked
+3. **Inter-Plugin Conflict Detection**: If multiple plugins have mutually exclusive version constraints for the same Python package, all are blocked from loading
+4. **Automatic Installation**: For missing Python dependencies of loadable plugins, the index order and constrained dependencies in the main program's `pyproject.toml` under `[tool.uv]` are read, and installation is attempted **one source at a time — any single source succeeding is enough**. The main program's `constraint-dependencies` are passed explicitly to the install command as a temporary constraint file. If every source fails, the error lists the failure summary of each source
+5. **Topological Sorting**: Determine the Runner startup order based on cross-Supervisor dependency relationships; circular dependencies will be rejected
+
+The index order follows uv's own semantics: indexes that are not `default = true` come first in declaration order, with `default = true` last. The uv branch appends `--no-config` when an index is specified — uv merges indexes from `pyproject.toml` with command-line indexes, and only this flag restricts the install to that one source. Plugin `dependencies` declaration rules (`type` / `id` / `version_spec` / `name`) are unaffected; keep writing them as before.
+
+## Validation Rules
+
+The Manifest Validator (`ManifestValidator`) adopts Pydantic strict mode. The main validation rules include:
+
+- **No Extra Fields**: Fields not declared in `_manifest.json` are not allowed.
+- **ID Format**: Must match `^[A-Za-z0-9_]+(?:[.-][A-Za-z0-9_]+)+$` — letters, digits, and underscores split into at least two segments by dots or hyphens (e.g., `com.example.my-plugin`). Lowercase is not enforced; `Mai-with-u.qq-adapter` is valid.
+- **Version Format**: Must be a three-part `X.Y.Z` format.
+- **URL Format**: Must start with `http://` or `https://`.
+- **No Self-Dependency**: The plugin cannot depend on itself in `dependencies`.
+- **No Duplicate Dependencies**: Each plugin/package name can only be declared once.
+
+### Version Range Rules
+
+Both `host_application` and `sdk` are judged by the same validation entry point, with results split into error and warning tiers:
+
+- **Host above `max_version` with the same major version and at most 1 higher minor** — warning; the plugin loads normally
+- **Host out of range in any other case** — error; the plugin is blocked from loading (below `min_version`, two or more minor versions higher, or a different major version)
+- **SDK out of range** — warning; the plugin loads normally, and the log records the declared SDK range and the current SDK version
+
+The handshake-time check of the Runner's own SDK version (fixed range `[1.0.0, 2.99.99]`) is independent of the two tiers above: it is not declared by the manifest and is not affected by "Force Plugin Compatibility".
+
+### Force Plugin Compatibility
+
+With the main-program config `[debug] force_plugin_compatibility` (the "Force plugin compatibility" switch in the WebUI debug settings) enabled, both the Host and the Runner skip the `host_application` and `sdk` range checks: out-of-range plugins are no longer recorded as errors, only a warning that includes the declared ranges and the current Host / SDK versions.
+
+- **Requires restarting MaiBot** — the Host encodes the switch into the `MAIBOT_FORCE_PLUGIN_COMPATIBILITY` environment variable for the Runner; editing the config does not hot-update an already running Runner
+- **Skips version ranges only** — `manifest_version`, the fixed SDK range at handshake, dependency resolution, the capability whitelist, and `llm_providers` consistency are all still enforced
+- **Does not affect the Plugin Market** — version-index compatibility checks do not read this switch; the "incompatible" labels in the market and the version dropdown are still computed from the declared ranges
+
+Treat it as a temporary tool for answering "is a version number blocking this plugin?" rather than a permanent setting: with the check skipped, runtime failures caused by interface changes come with no upfront signal.
+
+## Verify and Troubleshoot
+
+**Verification** — confirm the JSON parses with the command below, then drop `_manifest.json` into the plugin directory and reload: the WebUI plugin page shows the plugin as loaded, and any rejection is named in the Runner log by `ManifestValidator`.
+
+::: code-group
+
+```bash [Bash ~vscode-icons:file-type-shell~]
+# Run inside the plugin directory: a stray comma or comment fails right here
+python -m json.tool _manifest.json
+```
+
+:::
+
+- **`extra fields not permitted`** — the validator runs Pydantic in strict mode and rejects any field outside the declared structure: remove custom comment or scratch fields.
+- **Format errors on `id`, `version`, or `author`** — `id` must match `^[A-Za-z0-9_]+(?:[.-][A-Za-z0-9_]+)+$` (letters, digits, and underscores, with at least one `.` or `-` splitting it into two segments; case is not restricted), `version` and both range bounds must be strict `X.Y.Z`, and `author` must be a `{ name, url }` object whose `url` starts with `http://` or `https://`.
+- **The plugin is blocked as version-incompatible** — a Host mismatch is an error unless the major version matches and the minor is at most 1 higher; an SDK mismatch only logs a warning and does not block loading. Once you have tested on the new version, raise the Host `max_version` to that version's major.minor plus `.99` (for example `1.4.99`), or enable "Force plugin compatibility" for triage — it needs a MaiBot restart and skips version ranges only.
+- **A local `display.icon` does not render or is rejected** — with `type="local"`, `value` must be a relative path inside the plugin directory ending in `.png`, `.jpg`, `.jpeg`, `.webp`, or `.svg`; online URLs are never allowed, and absolute paths, `..`, and symbolic links are refused. A failed load falls back to `fallback`.
+- **The log reports a dependency or `llm_providers` conflict** — no self-dependency, duplicate declaration, or circular dependency, and each `client_type` must match its `@LLMProvider` declaration exactly; when two plugins declare the same `client_type`, both are blocked.
+- **`ffmpeg not installed or executable not found` at runtime** — the plugin is calling a system command from the host PATH. Depend on a `python_package` that bundles a static binary (for example `imageio-ffmpeg`) and preflight it in `on_load()`; the official Docker image does not preinstall media tools.

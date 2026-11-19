@@ -1,0 +1,394 @@
+---
+title: Manifest
+---
+
+# Manifest 系统
+
+每个插件根目录必须有 `_manifest.json`，声明元信息、版本兼容性、依赖关系与能力需求。Host 侧的 `ManifestValidator` 在加载前严格校验。
+
+::: tip 插件元信息与运行时配置
+- `_manifest.json`：声明插件 ID、版本、依赖和能力，由 Host 校验和管理
+- `plugin.py` 中的 `config_model`：声明配置结构、默认值和 WebUI 元数据
+- `config.toml`：保存当前安装实例的运行时配置，由 Runner 根据 `config_model` 生成和维护
+:::
+
+## _manifest.json 结构
+
+以下是一个完整的 Manifest 示例：
+
+::: code-group
+
+```json [JSON ~vscode-icons:file-type-json~]
+{
+  "manifest_version": 2,
+  "id": "com.example.my-plugin",
+  "version": "1.0.0",
+  "name": "我的插件",
+  "description": "一个示例插件",
+  "author": {
+    "name": "开发者",
+    "url": "https://github.com/developer"
+  },
+  "license": "MIT",
+  "urls": {
+    "repository": "https://github.com/developer/my-plugin",
+    "homepage": "https://example.com",
+    "documentation": "https://docs.example.com",
+    "issues": "https://github.com/developer/my-plugin/issues"
+  },
+  "host_application": {
+    "min_version": "1.4.0",
+    "max_version": "1.4.99"
+  },
+  "sdk": {
+    "min_version": "2.22.0",
+    "max_version": "2.22.99"
+  },
+  "dependencies": [],
+  "changelog": "CHANGELOG.md",
+  "plugin_type": "tool",
+  "display": {
+    "icon": {
+      "type": "lucide",
+      "value": "wrench"
+    }
+  },
+  "capabilities": ["send.text", "send.emoji", "config.get"],
+  "i18n": {
+    "default_locale": "zh-CN",
+    "locales_path": "i18n",
+    "supported_locales": ["zh-CN", "en-US"]
+  }
+}
+```
+
+:::
+
+## 必填字段
+
+- **`manifest_version`** `2` — Manifest 协议版本，当前固定为 `2`
+- **`id`** `string` — 插件唯一标识符，字母、数字、下划线组成，用点号或横线分段（如 `com.author.plugin`）。校验器不强制大小写，`Mai-with-u.qq-adapter` 就是带大写的官方插件；插件市场和官方插件约定俗成用小写。
+- **`version`** `string` — 插件版本号，必须为严格三段式语义版本（如 `1.0.0`）
+- **`name`** `string` — 插件展示名称
+- **`description`** `string` — 插件描述
+- **`author`** `object` — 插件作者信息，包含 `name`（作者名）和 `url`（作者主页，必须为 HTTP/HTTPS URL）
+- **`license`** `string` — 插件许可证
+- **`urls`** `object` — 插件相关链接集合（见下文）
+- **`host_application`** `object` — Host 兼容区间（见下文）
+- **`sdk`** `object` — SDK 兼容区间（见下文）
+- **`capabilities`** `string[]` — 插件声明的能力请求列表，不允许包含空值。**能力名是逐项的**（如 `send.text`、`emoji.get_random`、`config.get`），Host 按名字精确比对：声明了哪项才能调用哪项，没声明的调用会被拒绝并报"未获授权能力"。完整清单见 [API 参考](./api-reference) 各能力组。
+- **`i18n`** `object` — 国际化配置（见下文）
+
+## 可选字段
+
+### plugin_type 插件类型
+
+`plugin_type` 表示插件的主要类别，供 WebUI 展示和筛选。字段可省略；缺省或填写 `extension` 时显示为“无类别”，不列入分类筛选。请选择最能代表插件主要功能的一项。
+
+- `adapter` — 适配器：接入聊天平台或消息协议
+- `tool` — 工具：命令、查询和模型可调用工具
+- `provider` — 服务提供方：LLM、TTS、API 等能力提供方
+- `management` — 管理：群管理、权限和后台管理
+- `data` — 数据与知识：统计、记忆、知识库和数据处理
+- `media` — 媒体：图片、语音、视频和表情处理
+- `game` — 游戏娱乐：游戏、娱乐和互动
+- `integration` — 外部集成：外部平台、搜索服务和 Webhook
+- `other` — 其他：无法归入已有类别的插件
+- `chat` — 聊天：对话、回复和聊天行为增强
+- `creative` — 创作：绘画、写作和内容生成
+- `automation` — 自动化：定时任务、自动执行和工作流
+- `deskpet` — 桌宠：桌面宠物及相关交互
+
+兼容旧值：`knowledge` 显示为数据与知识，`entertainment` 显示为游戏娱乐，`search` 显示为外部集成；其他未知值显示为其他。Host 目前接受字符串，不强制校验上述枚举。`adapter` 还用于适配器 Runner 分组。
+
+### display 展示元信息
+
+`display.icon` 用于声明插件图标。该字段只影响 WebUI 展示，不参与插件运行时行为。
+
+::: code-group
+
+```json [JSON ~vscode-icons:file-type-json~]
+{
+  "display": {
+    "icon": {
+      "type": "local",
+      "value": "assets/icon.png",
+      "fallback": "package",
+      "background": "#1f2937"
+    }
+  }
+}
+```
+
+:::
+
+- `type`: `lucide`、`emoji` 或 `local`
+- `value`: 图标值。`lucide` 使用图标名，`emoji` 使用单个表情或短文本，`local` 使用插件目录内相对路径
+- `fallback`: 可选，图标加载失败时使用的 lucide 图标名
+- `background`: 可选，图标背景色，格式为 `#RRGGBB`
+
+不允许使用在线 URL 作为插件图标。本地图标仅支持 `.png`、`.jpg`、`.jpeg`、`.webp`、`.svg`，路径必须位于插件目录内，不能使用绝对路径、`..` 或符号链接。
+
+### urls 链接集合
+
+- **`repository`** · 必填 — 插件仓库地址，必须为 HTTP/HTTPS URL
+- **`homepage`** · 可选 — 插件主页地址
+- **`documentation`** · 可选 — 插件文档地址
+- **`issues`** · 可选 — 插件问题反馈地址
+
+### changelog 更新日志
+
+- **`changelog`** · 可选 — 更新日志位置，两种写法：`http://` / `https://` 开头的 URL，或插件目录内的 `.md` 相对路径（如 `CHANGELOG.md`）
+
+绝对路径、含 `..` 的路径、以及后缀不是 `.md` 的文件会被校验器直接拒绝。省略该字段时，本地已安装插件会回退读取插件根目录下名为 `changelog.md` 的文件（不区分大小写，`CHANGELOG.md` 也算）；插件市场的详情页只认这里声明的路径。
+
+### host_application / sdk 版本区间
+
+两者结构相同，为闭区间声明：
+
+::: code-group
+
+```json [JSON ~vscode-icons:file-type-json~]
+{
+  "min_version": "1.4.0",
+  "max_version": "1.4.99"
+}
+```
+
+:::
+
+- `min_version`：允许的最低版本（闭区间）
+- `max_version`：允许的最高版本（闭区间）
+- 两者均必须为严格三段式语义版本号（`X.Y.Z`），不能留空
+- `min_version` 不能大于 `max_version`
+
+**校验时机与结果**：这两个区间由 Runner 在加载插件时用 `ManifestValidator` 校验，Host 通过 `MAIBOT_HOST_VERSION` 把自身版本传给 Runner，SDK 版本则取 Runner 运行环境里实际导入的 `maibot-plugin-sdk` 版本。握手阶段（`runner.hello`）Host 另外校验 Runner 自身 SDK 版本是否落在固定区间 `[1.0.0, 2.99.99]`，越界只记 warning，与 manifest 里声明的 `sdk` 区间是两道独立检查。
+
+不兼容时的处理并不相同：
+
+- **Host 超范围** — 当前 Host 高于 `max_version`，但主版本相同且次版本最多高 1 时，插件**仍会加载**，只记一条 warning；再高就是 error，插件被阻止加载。低于 `min_version` 一律 error
+- **SDK 超范围** — 无论高低都只记一条 warning，插件**仍会加载**。安装、更新和 Runner 连接都不会因 SDK 区间被阻止；实际兼容性由运行期表现决定
+
+::: danger max_version 必须是明确的上限
+`max_version` 写成你实际测试过的最高「主.次」版本加 `.99`，例如在 1.4 上验证过就写 `1.4.99`，在 1.5 上验证过就写 `1.5.99`。同一个次版本内的补丁更新（`1.4.10`、`1.4.37`）落在区间里，不产生任何告警；写成 `1.4.0` 则每次补丁更新都会触发一条超范围告警。次版本前进一档（`1.5.x`）时靠兼容窗口告警放行，给你留出重新测试的时间。
+
+禁止写 `1.99.99`、`999.999.999` 这类没有对应真实版本的上限：它们相当于没有声明上限，插件会被加载到从未验证过的版本上。
+:::
+
+::: code-group
+
+```json [JSON ~vscode-icons:file-type-json~]
+{
+  "host_application": {
+    "min_version": "1.4.0",
+    "max_version": "1.4.99"
+  },
+  "sdk": {
+    "min_version": "2.22.0",
+    "max_version": "2.22.99"
+  }
+}
+```
+
+:::
+
+### i18n 国际化配置
+
+- **`default_locale`** · 必填 — 默认语言代码（如 `zh-CN`）
+- **`locales_path`** · 可选 — 语言资源文件目录路径
+- **`supported_locales`** · 可选 — 支持的语言列表，不可包含空值和重复项。若非空，则 `default_locale` 必须存在于该列表中
+
+### llm_providers LLM Provider 声明
+
+声明插件提供的 LLM Provider 能力，供其他插件通过 `ctx.llm` 代理调用。
+
+- **`client_type`** · 必填 — Provider 唯一标识符，必须与 `@LLMProvider` 装饰器中声明的值完全一致
+- **`name`** · 可选 · 默认空字符串 — Provider 展示名称
+- **`description`** · 可选 · 默认空字符串 — Provider 功能描述
+- **`version`** · 可选 · 默认 `"1.0.0"` — Provider 版本号
+
+::: warning 双重声明要求
+`llm_providers` 字段与 `@LLMProvider` 装饰器必须同时声明，且 `client_type` 必须完全匹配。若仅在一处声明，另一处缺失或不一致，插件将被阻止加载。
+:::
+
+::: danger 冲突加载策略
+若两个插件声明了相同的 `client_type`，则**两个插件均被禁止加载**。请在设计 Provider 时使用唯一的前缀（如 `com.example.my-provider`）避免冲突。
+:::
+
+::: code-group
+
+```json [JSON ~vscode-icons:file-type-json~]
+{
+  "llm_providers": [
+    {
+      "client_type": "my_custom_llm",
+      "name": "My Custom LLM",
+      "description": "A custom LLM provider",
+      "version": "1.0.0"
+    }
+  ]
+}
+```
+
+:::
+
+## 依赖声明
+
+`dependencies` 数组支持两种类型的依赖，通过 `type` 字段区分：
+
+### 插件级依赖
+
+::: code-group
+
+```json [JSON ~vscode-icons:file-type-json~]
+{
+  "type": "plugin",
+  "id": "com.example.other-plugin",
+  "version_spec": ">=1.0.0,<2.0.0"
+}
+```
+
+:::
+
+- `id`：依赖插件的 ID，遵循与插件 ID 相同的格式规则
+- `version_spec`：版本约束表达式，使用 PEP 440 风格（如 `>=1.0.0`、`~=1.0`）
+- 不允许循环依赖或依赖自身
+- 不允许重复声明同一个插件依赖
+
+### Python 包依赖
+
+::: code-group
+
+```json [JSON ~vscode-icons:file-type-json~]
+{
+  "type": "python_package",
+  "name": "httpx",
+  "version_spec": ">=0.24.0"
+}
+```
+
+:::
+
+- `name`：Python 包名，仅允许字母、数字、点号、下划线和横线
+- `version_spec`：版本约束表达式
+
+### 系统工具依赖
+
+`dependencies` 只覆盖 Python 包，没有声明系统包或可执行文件的类型。插件用到的 `ffmpeg`、`imagemagick`、`7z` 这类命令要由插件自带：官方 Docker 镜像不预装媒体工具，native 安装取决于用户自己的系统，同一个插件在 Windows 或 macOS 上会表现不同。
+
+需要 ffmpeg 时，用自带静态二进制的 Python 包（如 `imageio-ffmpeg`、`static-ffmpeg`），按 `python_package` 声明：
+
+::: code-group
+
+```json [JSON ~vscode-icons:file-type-json~]
+{
+  "type": "python_package",
+  "name": "imageio-ffmpeg",
+  "version_spec": ">=0.6.0"
+}
+```
+
+:::
+
+执行时取包内二进制的绝对路径：
+
+::: code-group
+
+```python [Python ~vscode-icons:file-type-python~]
+import asyncio
+
+import imageio_ffmpeg
+
+# 包内静态二进制，随插件依赖安装，不依赖宿主的 PATH
+FFMPEG = imageio_ffmpeg.get_ffmpeg_exe()
+
+
+async def merge_av(v_path: str, a_path: str, output_path: str) -> None:
+    process = await asyncio.create_subprocess_exec(
+        FFMPEG,
+        "-y",
+        "-i",
+        v_path,
+        "-i",
+        a_path,
+        "-c",
+        "copy",
+        "-map",
+        "0:v:0",
+        "-map",
+        "1:a:0",
+        output_path,
+    )
+    exit_code = await process.wait()
+    if exit_code != 0:
+        raise RuntimeError(f"ffmpeg 退出码 {exit_code}")
+```
+
+:::
+
+- **加载时预检** — 在 `on_load()` 里解析一次可执行文件路径并确认可执行。下载完几十 MB 素材、走到合并那一步才报错，用户拿不到可操作的信息。
+- **留出配置覆盖** — 配置模型里提供可选的 ffmpeg 路径字段，用户换用自备版本、排查问题时不必改代码。
+- **README 写明要求** — 确实需要用户自备系统工具时（例如 GPU 编码），在依赖一节给出各平台的安装命令。只写 Docker 镜像补装会漏掉 native 和 Windows 用户。
+
+### 依赖解析流程
+
+`PluginDependencyPipeline` 在 Host 侧统一执行依赖分析：
+
+1. **扫描**：收集所有插件的 `_manifest.json`
+2. **检测 Host 冲突**：若插件的 Python 包依赖与主程序的依赖约束无交集，则阻止加载
+3. **检测插件间冲突**：若多个插件对同一 Python 包的版本约束互斥，则全部阻止加载
+4. **自动安装**：对可加载插件缺失的 Python 依赖，读取主程序 `pyproject.toml` 中 `[tool.uv]` 的索引顺序与约束依赖，**逐个源单独安装，任意一个源成功即可**；主程序的 `constraint-dependencies` 会以临时约束文件显式传给安装命令。全部源失败时，报错会列出每个源的失败摘要
+5. **拓扑排序**：根据跨 Supervisor 依赖关系决定 Runner 启动顺序，循环依赖将被拒绝
+
+索引顺序沿用 uv 自己的语义：非 `default = true` 的索引按声明顺序排在前，`default = true` 的排在最后。uv 分支在指定索引时会追加 `--no-config`——uv 会把 `pyproject.toml` 的索引与命令行索引合并，只有加上它才保证本次只查这一个源。插件的 `dependencies` 声明规则（`type` / `id` / `version_spec` / `name`）不受影响，照旧编写即可。
+
+## 校验规则
+
+Manifest 校验器（`ManifestValidator`）采用 Pydantic 严格模式，主要校验规则包括：
+
+- **禁止多余字段**：不允许出现 `_manifest.json` 未声明的字段
+- **ID 格式**：必须匹配 `^[A-Za-z0-9_]+(?:[.-][A-Za-z0-9_]+)+$`，即字母、数字、下划线，用点号或横线分成至少两段（如 `com.example.my-plugin`）。不强制小写，`Mai-with-u.qq-adapter` 合法
+- **版本号格式**：必须为 `X.Y.Z` 三段式
+- **URL 格式**：必须以 `http://` 或 `https://` 开头
+- **不允许自依赖**：`dependencies` 中不能依赖自身
+- **不允许重复依赖**：同一插件/包名只能声明一次
+
+### 版本区间规则
+
+`host_application` 与 `sdk` 两个区间由同一个校验入口判定，结果分 error 与 warning 两档：
+
+- **Host 高于 `max_version`，主版本相同且次版本最多高 1** — warning，插件照常加载
+- **Host 其余情况超出区间** — error，插件被阻止加载（含低于 `min_version`、次版本高出 2 档以上、主版本不同）
+- **SDK 超出区间** — warning，插件照常加载；日志会写明声明的 SDK 区间与当前 SDK 版本
+
+握手阶段 Host 对 Runner 自身 SDK 版本的检查（固定区间 `[1.0.0, 2.99.99]`）独立于上面两档，既不由 manifest 声明，也不受「强制插件兼容」影响。
+
+### 强制插件兼容
+
+主程序配置 `[debug] force_plugin_compatibility`（WebUI 调试配置里的「强制插件兼容」开关）开启后，Host 与 Runner 都会跳过 `host_application` 与 `sdk` 两个区间的校验：超范围的插件不再记为 error，只追加一条 warning，内容包含插件声明的 Host / SDK 区间与当前 Host / SDK 版本。
+
+- **需重启 MaiBot 生效** — Host 把开关编码进 `MAIBOT_FORCE_PLUGIN_COMPATIBILITY` 环境变量传给 Runner，改配置不会热更新到已在跑的 Runner
+- **只跳过版本区间** — `manifest_version`、握手阶段的固定 SDK 区间、依赖解析、能力白名单、`llm_providers` 一致性等校验一律照旧
+- **不影响插件市场** — 版本索引的兼容性判断不读这个开关，市场与版本下拉里显示的"不兼容"仍然按 manifest 声明计算
+
+强制兼容只用于排查"插件是不是被版本号挡住"，不要长期开启：跳过校验后，因接口变化导致的运行期异常不会有任何前置提示。
+
+## 验证与排错
+
+**验收动作** — 先用下面的命令确认 JSON 能解析，再把 `_manifest.json` 放进插件目录并重载：WebUI 插件页里它处于已加载状态，被拦下时 Runner 日志会给出 `ManifestValidator` 的具体错误。
+
+::: code-group
+
+```bash [Bash ~vscode-icons:file-type-shell~]
+# 在插件目录里运行：多余的逗号、注释会让这一步直接报错
+python -m json.tool _manifest.json
+```
+
+:::
+
+- **报「extra fields not permitted」** — 校验器是 Pydantic 严格模式，不允许出现未声明的字段：自定义注释字段、临时字段都要删掉。
+- **报 ID / 版本 / 作者字段格式错误** — `id` 必须匹配 `^[A-Za-z0-9_]+(?:[.-][A-Za-z0-9_]+)+$`（字母、数字、下划线，至少一个 `.` 或 `-` 分出两段；大小写不限），`version` 与两个区间的上下界必须是严格三段式 `X.Y.Z`，`author` 必须是 `{ name, url }` 且 `url` 以 `http://` 或 `https://` 开头。
+- **插件被阻止加载且日志提示版本不兼容** — Host 超出区间除「主版本相同且次版本最多高 1」记 warning 外都是 error；SDK 超出区间只记 warning，不会阻止加载。在真实的新版本上测试通过后，把 Host 的 `max_version` 提到该版本的「主.次」加 `.99`（如 `1.4.99`）；临时排查可开「强制插件兼容」，但它需要重启 MaiBot 且只跳过版本区间。
+- **`display.icon` 的本地图标不显示或被拒** — `type="local"` 的 `value` 必须是插件目录内的相对路径，后缀为 `.png`/`.jpg`/`.jpeg`/`.webp`/`.svg`；在线 URL 一律不允许，绝对路径、`..` 和符号链接也会被拒，加载失败会退回 `fallback`。
+- **日志提示依赖或 `llm_providers` 冲突** — 不能依赖自身、重复声明同一依赖或形成循环依赖；`client_type` 要与 `@LLMProvider` 声明完全一致，两个插件声明同一个 `client_type` 时双方都会被禁止加载。
+- **运行时报「ffmpeg 未安装或无法找到可执行文件」** — 插件在调用宿主 PATH 里的系统命令。改用 `imageio-ffmpeg` 这类自带静态二进制的 `python_package` 依赖，并在 `on_load()` 预检；官方 Docker 镜像不预装媒体工具。

@@ -1,0 +1,209 @@
+import { readFileSync } from 'node:fs'
+import { defineConfig } from 'vitepress'
+import { MermaidPlugin, MermaidMarkdown } from "vitepress-plugin-mermaid"
+import { InlineLinkPreviewElementTransform } from '@nolebase/vitepress-plugin-inline-link-preview/markdown-it'
+import llmstxt from 'vitepress-plugin-llms'
+import timeline from 'vitepress-markdown-timeline'
+import { groupIconMdPlugin, groupIconVitePlugin } from 'vitepress-plugin-group-icons'
+import type { Token, Options } from 'markdown-it'
+import { nav as zhNav, sidebar as zhSidebar } from './sidebar/zh.ts'
+import { nav as enNav, sidebar as enSidebar } from './sidebar/en.ts'
+import { countWord, extractDescription } from './theme/utils/functions.ts'
+import maiContainers from './markdown/containers.ts'
+
+// https://vitepress.dev/reference/site-config
+export default defineConfig({
+  title: "MaiBot Docs",
+  description: "MaiBot Development and Usage Guide",
+  ignoreDeadLinks: 'localhostLinks',
+  lastUpdated: true,
+  cleanUrls: true,
+  srcExclude: ['**/README.md', '**/AGENTS.md', 'public/**'],
+  transformPageData(pageData) {
+    if (!pageData.filePath) return
+    const raw = readFileSync(pageData.filePath, 'utf-8')
+    const result: Record<string, unknown> = { wordCount: countWord(raw) }
+    if (!pageData.frontmatter.description) {
+      const description = extractDescription(raw)
+      if (description) result.description = description
+    }
+    return result
+  },
+  transformHead({ pageData, title, description }) {
+    const isEn = pageData.relativePath.startsWith('en/')
+    const rel = pageData.relativePath
+      .replace(/(^|\/)index\.md$/, '$1')
+      .replace(/\.md$/, '')
+    const image = 'https://docs.maibot.chat/title_img/mai2.png'
+    return [
+      ['meta', { property: 'og:type', content: 'website' }],
+      ['meta', { property: 'og:site_name', content: isEn ? 'MaiBot Docs' : 'MaiBot 文档中心' }],
+      ['meta', { property: 'og:title', content: title }],
+      ['meta', { property: 'og:description', content: description }],
+      ['meta', { property: 'og:url', content: 'https://docs.maibot.chat/' + rel }],
+      ['meta', { property: 'og:image', content: image }],
+      ['meta', { name: 'twitter:title', content: title }],
+      ['meta', { name: 'twitter:description', content: description }],
+      ['meta', { name: 'twitter:image', content: image }],
+    ]
+  },
+  sitemap: {
+    hostname: 'https://docs.maibot.chat'
+  },
+  locales: {
+    root: {
+      label: '简体中文',
+      lang: 'zh-CN',
+      title: 'MaiBot 文档中心',
+      description: 'MaiBot 开发与使用指南',
+      themeConfig: {
+        editLink: {
+          pattern: "https://github.com/Mai-with-u/docs/edit/main/:path",
+          text: "在 GitHub 上编辑此页"
+        },
+        lastUpdated: {
+          text: "最后更新",
+          formatOptions: {
+            dateStyle: "short",
+            timeStyle: "short",
+          },
+        },
+        nav: zhNav,
+        sidebar: zhSidebar,
+        outline: { level: [2, 4], label: '本页目录' },
+        docFooter: { prev: '上一篇', next: '下一篇' },
+        darkModeSwitchLabel: '外观',
+        lightModeSwitchTitle: '切换到深色主题',
+        darkModeSwitchTitle: '切换到浅色主题',
+        sidebarMenuLabel: '菜单',
+        returnToTopLabel: '回到顶部',
+        langMenuLabel: '切换语言',
+        skipToContentLabel: '跳到主要内容',
+        notFound: {
+          title: '页面不存在',
+          quote: '你要找的页面可能已被移动或删除。',
+          linkLabel: '返回首页',
+          linkText: '回到首页',
+        },
+      }
+    },
+    en: {
+      label: 'English',
+      lang: 'en-US',
+      title: 'MaiBot Docs',
+      description: 'MaiBot Development and Usage Guide',
+      link: '/en/',
+      themeConfig: {
+        editLink: {
+          pattern: "https://github.com/Mai-with-u/docs/edit/main/:path",
+          text: "Edit this page on GitHub"
+        },
+        lastUpdated: {
+          text: "Last updated",
+          formatOptions: {
+            dateStyle: "short",
+            timeStyle: "short",
+          },
+        },
+        nav: enNav,
+        sidebar: enSidebar,
+        outline: { level: [2, 4], label: 'On this page' },
+      }
+    }
+  },
+  rewrites: {
+    'zh/:rest*': ':rest*'
+  },
+  head: [
+    ['link', { rel: 'icon', type: 'image/png', href: '/title_img/mai2.png' }],
+    ['meta', { name: 'theme-color', content: '#d2691e', media: '(prefers-color-scheme: light)' }],
+    ['meta', { name: 'theme-color', content: '#ffa940', media: '(prefers-color-scheme: dark)' }],
+    ['meta', { name: 'twitter:card', content: 'summary_large_image' }],
+    // 首屏绘制前写入界面风格，避免先闪一下原版；默认值与 theme/utils/theme-style.ts 的 DEFAULT_THEME_STYLE 一致
+    ['script', {}, `(()=>{try{var s=localStorage.getItem('maibot-docs-theme-style');if(s!=='modern'&&s!=='millennium')s='millennium';if(s!=='modern')document.documentElement.setAttribute('data-theme-style',s)}catch(e){document.documentElement.setAttribute('data-theme-style','millennium')}})()`],
+  ],
+  themeConfig: {
+    search: {
+      provider: 'local',
+      options: {
+        locales: {
+          root: {
+            translations: {
+              button: { buttonText: '搜索', buttonAriaLabel: '搜索' },
+              modal: {
+                displayDetails: '显示详情',
+                resetButtonTitle: '重置',
+                backButtonTitle: '返回',
+                noResultsText: '未找到结果',
+                footer: {
+                  selectText: '选择',
+                  selectKeyAriaLabel: '回车',
+                  navigateText: '切换',
+                  navigateUpKeyAriaLabel: '上箭头',
+                  navigateDownKeyAriaLabel: '下箭头',
+                  closeText: '关闭',
+                  closeKeyAriaLabel: 'Esc',
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    // 顶栏只留主仓库一个外链；X / Discord / Telegram 在「交流群」页都有卡片
+    socialLinks: [
+      { icon: 'github', link: 'https://github.com/Mai-with-u/MaiBot' },
+    ],
+  },
+  markdown: {
+    // 必须显式开启，VitePress 才会把标题收集进 pageData.headers；
+    // 否则右侧「本页目录」（outline）会永远是空的。
+    // 注意这里的 level 是「精确层级列表」（不是 themeConfig.outline 的区间语义）。
+    headers: { level: [2, 3, 4] },
+    config(md) {
+      md.use(MermaidMarkdown);
+      md.use(InlineLinkPreviewElementTransform);
+      md.use(groupIconMdPlugin);
+      md.use(timeline);
+      md.use(maiContainers);
+      md.renderer.rules.heading_close = (tokens: Token[], idx: number, options: Options, env: any, slf: any) => {
+        let htmlResult = slf.renderToken(tokens, idx, options)
+        if (tokens[idx].tag === 'h1' && !env.metadataRendered) {
+          env.metadataRendered = true
+          htmlResult += '<ArticleMetadata />'
+        }
+        return htmlResult
+      }
+    },
+  },
+  // 注：VitePress 1.x 的 metaChunk 选项在 2.x 已移除，不再需要（页面元数据自动拆分）。
+  vite: {
+    plugins: [
+      groupIconVitePlugin({
+        customIcon: {
+          'git': 'vscode-icons:file-type-git',
+          'uv': 'vscode-icons:file-type-python',
+          'pip': 'vscode-icons:file-type-python',
+        },
+      }),
+      MermaidPlugin(),
+      llmstxt({ workDir: 'zh', ignoreFiles: ['index.md'], domain: 'https://docs.maibot.chat' }),
+    ],
+    optimizeDeps: {
+      include: ['mermaid'],
+      exclude: [
+        '@nolebase/vitepress-plugin-inline-link-preview/client',
+        '@nolebase/vitepress-plugin-enhanced-readabilities/client',
+        '@nolebase/ui',
+      ],
+    },
+    ssr: {
+      noExternal: [
+        'mermaid',
+        '@nolebase/vitepress-plugin-inline-link-preview',
+        '@nolebase/vitepress-plugin-enhanced-readabilities',
+        '@nolebase/ui',
+      ],
+    },
+  },
+})

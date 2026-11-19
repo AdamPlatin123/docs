@@ -1,0 +1,137 @@
+---
+title: Linux 部署
+---
+
+# Linux 部署
+
+在 Linux 和 macOS 上，可以通过 [uv 安装](./uv-tool)直接安装主程序和 WebUI。下面介绍适合修改代码的源码部署，也可以选择 [Docker 部署](./docker)，或把[安装提示词](./installation-agent)交给 AI 助手。
+
+不想维护 Git 仓库、或者想从 WebUI 一键更新主程序，用[uv 安装](./uv-tool.md)。
+
+## 准备环境
+
+MaiBot 需要 [Python](https://www.python.org/downloads/) 3.12、[Git](https://git-scm.com/downloads)，以及至少 2GB 可用内存。
+
+先验证一下你的环境：
+
+::: code-group
+
+```bash [~vscode-icons:file-type-shell~]
+python3 --version
+git --version
+```
+
+:::
+
+如果版本不满足要求，按你的发行版安装：
+
+::: code-group
+
+```bash [Ubuntu / Debian ~vscode-icons:file-type-shell~]
+sudo apt update && sudo apt install -y python3.12 python3-pip git
+```
+
+```bash [Fedora / RHEL ~vscode-icons:file-type-shell~]
+sudo dnf install -y python3.12 git
+```
+
+```bash [Arch Linux ~vscode-icons:file-type-shell~]
+sudo pacman -S python git
+```
+
+:::
+
+::: tip
+MaiBot 要求 Python 3.12 及以上。如果系统自带的版本较低，建议用 pyenv 或发行版提供的最新包升级。
+:::
+
+## 源码部署
+
+### 安装 uv
+
+我们推荐用 uv 管理依赖，它比传统 pip 快很多。
+
+::: code-group
+
+```bash [Bash ~vscode-icons:file-type-shell~]
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+:::
+
+::: tip
+如果安装后终端提示 `uv: command not found`，运行 `source $HOME/.local/bin/env` 刷新环境变量，或者重新打开一个终端窗口。
+:::
+
+### 下载 MaiBot
+
+::: code-group
+
+```bash [~vscode-icons:file-type-git~]
+git clone https://github.com/Mai-with-u/MaiBot.git
+```
+
+:::
+
+进入文件夹，安装依赖：
+
+::: code-group
+
+```bash [uv sync ~vscode-icons:file-type-python~]
+uv sync
+```
+
+```bash [pip install ~vscode-icons:file-type-python~]
+pip install -r requirements.txt
+```
+
+:::
+
+### 启动
+
+::: code-group
+
+```bash [Bash ~vscode-icons:file-type-shell~]
+uv run bot.py
+```
+
+:::
+
+第一次启动会弹出用户协议，在终端输入 **同意** 即可继续。
+
+启动后就可以直接在终端里和麦麦对话：`[debug].enable_console_input` 默认开启，在交互式终端里可以输入普通消息，也可以输入 `/clear`、`/pm`、`/offline`、`/online` 等管理指令，输入 `exit()` 则只关闭终端输入、Bot 继续运行。用 systemd 托管或把输出重定向到文件时，stdin 不是交互式终端，会跳过终端输入并多打一条 warning，不影响 MaiBot 正常运行。
+
+## 进入 WebUI
+
+启动后，MaiBot 会自动打开 WebUI 服务。打开浏览器，访问以下地址（把 `本机IP` 换成你的服务器地址，本机就是 `localhost`）：
+
+```
+http://本机IP:8001
+```
+
+首次启动时，终端会打印 WebUI 地址和临时登录密码，类似于这样：
+
+```text
+MaiBot 宿主已启动：/MaiMBot
+WebUI：http://127.0.0.1:8001/?token=...（登录链接一分钟内有效）
+WebUI 临时登录密码：QSwgc2VucGFp...
+可用 maibot host status/start/stop/restart 管理 Bot；Ctrl+C 关闭宿主。
+```
+
+点日志里的链接可直接进入 WebUI，也可以打开 http://127.0.0.1:8001 粘贴临时密码登录。临时密码由程序生成，保存在 `host/webui.json` 的 `access_token` 字段；想换成固定的密码，在 WebUI 里设置一次即可。
+
+进入 WebUI 后，跟随配置向导完成模型配置和平台连接即可。
+
+配置模型和连接 QQ 的详细步骤，参考 [模型配置](/manual/configuration/model-config) 和 [适配器](/manual/adapters/)。
+
+## 验证与排错
+
+**验证** — 启动后终端打印 WebUI 地址与临时登录密码；浏览器打开 `http://localhost:8001` 能用它登录，并在终端输入一句话能得到回复。
+
+**`uv: command not found`** — 运行 `source $HOME/.local/bin/env`，或重新打开一个终端。
+
+**Python 版本低于 3.12** — 用 pyenv 或发行版的新版包升级 Python，再执行 `uv sync`。
+
+**依赖安装失败** — 检查网络与磁盘空间后重试；国内网络可以给 uv 配置 PyPI 镜像。
+
+**WebUI 打不开** — 确认 `[webui].enabled = true`、8001 端口未被占用；远程访问时在防火墙放行该端口。
