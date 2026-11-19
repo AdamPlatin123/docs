@@ -232,3 +232,7 @@ member = await self.ctx.api.call(
 ## SnowLuma 专属画像
 
 当 `client_type = "snowluma"` 时，适配器自动套用 SnowLuma 专属画像。该画像下 `[chat_abilities]` 中的 `enable_poke_tool`、`enable_emoji_like_tool` 等扩展工具**正常启用**（与 NapCat 画像一致，不受标准模式白名单限制）。日志中搜索 `画像已生效` 可确认。
+
+## SnowLuma 专属画像
+
+当 `client_type = "snowluma"` 时，适配器自动套用 SnowLuma 专属画像。该画像下 `[chat_abilities]` 中的 `enable_poke_tool`、`enable_emoji_like_tool` 等扩展工具**正常启用**（与 NapCat 画像一致，不受标准模式白名单限制）。
